@@ -1,17 +1,29 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+  vi,
+  beforeEach,
+} from "vitest";
 import { OCRService } from "../ocrService";
 
 // Mock axios and cheerio
 vi.mock("axios");
 vi.mock("cheerio");
 
-describe("Instagram OCR Service", () => {
-  beforeAll(async () => {
-    await OCRService.initialize();
-  });
+// Mock environment variables
+vi.mock("process", () => ({
+  env: {
+    INSTAGRAM_ACCESS_TOKEN: "test_token",
+    ENABLE_SCRAPING_FALLBACK: "true",
+  },
+}));
 
-  afterAll(async () => {
-    await OCRService.terminate();
+describe("Instagram OCR Service", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
   describe("analyzeInstagramText", () => {
@@ -227,54 +239,374 @@ Mix and bake`;
     });
   });
 
-  describe("extractRecipeFromInstagramUrl", () => {
-    it("should process Instagram URL and return structured data", async () => {
-      // Since the mocking is complex and the actual functionality works,
-      // we'll test the individual components instead
-      const testText = `📌 PINNED COMMENT
-      
-      Here's the recipe! 🍕
-      
-      2 cups flour
-      1 cup water
-      1 tsp salt
-      2 tbsp olive oil
-      
-      Mix everything together and bake at 400°F for 20 minutes!
-      
-      #recipe #food #delicious #musttry`;
-
-      const analysis = OCRService.analyzeInstagramText(testText);
-      const extractedRecipe = OCRService.extractRecipeFromInstagramText(
-        testText,
-        analysis
-      );
-      const recipeConfidence =
-        OCRService.calculateRecipeConfidence(extractedRecipe);
-
-      expect(analysis.isComment).toBe(true);
-      expect(analysis.commentType).toBe("pinned");
-      expect(extractedRecipe).toContain("2 cups flour");
-      expect(recipeConfidence).toBeGreaterThan(0.5);
+  describe("extractMediaIdFromUrl", () => {
+    it("should extract media ID from standard post URL", () => {
+      const url = "https://www.instagram.com/p/ABC123/";
+      const mediaId = (OCRService as any).extractMediaIdFromUrl(url);
+      expect(mediaId).toBe("ABC123");
     });
 
-    it("should handle Instagram URL with no pinned comments", async () => {
-      // Test with caption content
-      const testText = `My favorite pasta recipe!
-      
-      1 cup flour
-      2 eggs
-      Mix and cook`;
+    it("should extract media ID from reel URL", () => {
+      const url = "https://www.instagram.com/reel/XYZ789/";
+      const mediaId = (OCRService as any).extractMediaIdFromUrl(url);
+      expect(mediaId).toBe("XYZ789");
+    });
 
-      const analysis = OCRService.analyzeInstagramText(testText);
-      const extractedRecipe = OCRService.extractRecipeFromInstagramText(
-        testText,
-        analysis
+    it("should extract media ID from IGTV URL", () => {
+      const url = "https://www.instagram.com/tv/DEF456/";
+      const mediaId = (OCRService as any).extractMediaIdFromUrl(url);
+      expect(mediaId).toBe("DEF456");
+    });
+
+    it("should handle URLs with query parameters", () => {
+      const url =
+        "https://www.instagram.com/p/ABC123/?utm_source=ig_web_copy_link";
+      const mediaId = (OCRService as any).extractMediaIdFromUrl(url);
+      expect(mediaId).toBe("ABC123");
+    });
+
+    it("should return null for invalid URLs", () => {
+      const invalidUrls = [
+        "https://www.instagram.com/",
+        "https://www.instagram.com/user/",
+        "https://example.com/p/ABC123/",
+        "not a url",
+      ];
+
+      invalidUrls.forEach((url) => {
+        const mediaId = (OCRService as any).extractMediaIdFromUrl(url);
+        expect(mediaId).toBeNull();
+      });
+    });
+  });
+
+  describe("extractRecipeFromInstagramAPI", () => {
+    it("should extract recipe from Instagram API response", async () => {
+      const mockAxios = await import("axios");
+      const mockResponse = {
+        data: {
+          id: "123456789",
+          caption: {
+            text: "My favorite pasta recipe!\n\n2 cups flour\n1 cup water\n1 tsp salt\n\nMix and cook for 10 minutes! 🍝",
+          },
+          comments: {
+            data: [
+              {
+                text: "This looks amazing! 😍",
+                timestamp: "2023-01-01T00:00:00Z",
+                from: { username: "user1" },
+              },
+              {
+                text: "Here's the full recipe:\n\n3 cups flour\n2 eggs\n1/2 cup olive oil\n\nMix ingredients and bake at 350°F for 25 minutes",
+                timestamp: "2023-01-01T00:01:00Z",
+                from: { username: "user2" },
+              },
+            ],
+          },
+          media_type: "IMAGE",
+          permalink: "https://www.instagram.com/p/ABC123/",
+        },
+      };
+
+      vi.mocked(mockAxios.default.get).mockResolvedValue(mockResponse);
+
+      const result = await OCRService.extractRecipeFromInstagramAPI(
+        "https://www.instagram.com/p/ABC123/"
       );
 
-      expect(analysis.commentType).toBe("regular");
-      expect(extractedRecipe).toContain("1 cup flour");
-      expect(extractedRecipe).toContain("2 eggs");
+      expect(result.text).toContain("My favorite pasta recipe!");
+      expect(result.text).toContain("Here's the full recipe:");
+      expect(result.confidence).toBe(0.9);
+      expect(result.commentType).toBe("caption");
+      expect(result.recipeConfidence).toBeGreaterThan(0.5);
+    });
+
+    it("should handle API response with only caption", async () => {
+      const mockAxios = await import("axios");
+      const mockResponse = {
+        data: {
+          id: "123456789",
+          caption: {
+            text: "Simple recipe:\n\n1 cup flour\n1/2 cup water\nMix and bake!",
+          },
+          comments: { data: [] },
+          media_type: "IMAGE",
+          permalink: "https://www.instagram.com/p/ABC123/",
+        },
+      };
+
+      vi.mocked(mockAxios.default.get).mockResolvedValue(mockResponse);
+
+      const result = await OCRService.extractRecipeFromInstagramAPI(
+        "https://www.instagram.com/p/ABC123/"
+      );
+
+      expect(result.text).toContain("Simple recipe:");
+      expect(result.commentType).toBe("caption");
+      expect(result.recipeConfidence).toBeGreaterThan(0.3);
+    });
+
+    it("should throw error when no recipe content found", async () => {
+      const mockAxios = await import("axios");
+      const mockResponse = {
+        data: {
+          id: "123456789",
+          caption: { text: "Just a photo of my cat 🐱" },
+          comments: { data: [] },
+          media_type: "IMAGE",
+          permalink: "https://www.instagram.com/p/ABC123/",
+        },
+      };
+
+      vi.mocked(mockAxios.default.get).mockResolvedValue(mockResponse);
+
+      await expect(
+        OCRService.extractRecipeFromInstagramAPI(
+          "https://www.instagram.com/p/ABC123/"
+        )
+      ).rejects.toThrow("No recipe content found in Instagram post");
+    });
+
+    it("should throw error when media ID cannot be extracted", async () => {
+      await expect(
+        OCRService.extractRecipeFromInstagramAPI(
+          "https://www.instagram.com/invalid/"
+        )
+      ).rejects.toThrow("Could not extract media ID from Instagram URL");
+    });
+  });
+
+  describe("extractRecipeFromInstagramScraping", () => {
+    it("should extract recipe from Instagram HTML", async () => {
+      const mockAxios = await import("axios");
+      const mockCheerio = await import("cheerio");
+
+      const mockHtml = `
+        <html>
+          <body>
+            <div data-testid="comment">
+              📌 PINNED COMMENT
+              Here's the recipe! 🍕
+              2 cups flour
+              1 cup water
+              1 tsp salt
+              2 tbsp olive oil
+              Mix everything together and bake at 400°F for 20 minutes!
+              #recipe #food #delicious #musttry
+            </div>
+          </body>
+        </html>
+      `;
+
+      vi.mocked(mockAxios.default.get).mockResolvedValue({ data: mockHtml });
+      vi.mocked(mockCheerio.load).mockReturnValue({
+        load: vi.fn(),
+        text: vi
+          .fn()
+          .mockReturnValue(
+            "📌 PINNED COMMENT\nHere's the recipe! 🍕\n2 cups flour\n1 cup water\n1 tsp salt\n2 tbsp olive oil\nMix everything together and bake at 400°F for 20 minutes!\n#recipe #food #delicious #musttry"
+          ),
+        find: vi.fn().mockReturnValue({
+          each: vi.fn().mockImplementation((callback) => {
+            callback(0, {
+              text: () =>
+                "📌 PINNED COMMENT\nHere's the recipe! 🍕\n2 cups flour\n1 cup water\n1 tsp salt\n2 tbsp olive oil\nMix everything together and bake at 400°F for 20 minutes!\n#recipe #food #delicious #musttry",
+            });
+          }),
+          length: 1,
+        }),
+        length: 1,
+      } as any);
+
+      const result = await OCRService.extractRecipeFromInstagramScraping(
+        "https://www.instagram.com/p/ABC123/"
+      );
+
+      expect(result.text).toContain("📌 PINNED COMMENT");
+      expect(result.text).toContain("2 cups flour");
+      expect(result.confidence).toBe(0.8);
+      expect(result.commentType).toBe("pinned");
+      expect(result.recipeConfidence).toBeGreaterThan(0.5);
+    });
+
+    it("should throw error when no recipe content found", async () => {
+      const mockAxios = await import("axios");
+      const mockCheerio = await import("cheerio");
+
+      const mockHtml = `
+        <html>
+          <body>
+            <div>Just some random content without recipes</div>
+          </body>
+        </html>
+      `;
+
+      vi.mocked(mockAxios.default.get).mockResolvedValue({ data: mockHtml });
+      vi.mocked(mockCheerio.load).mockReturnValue({
+        load: vi.fn(),
+        text: vi.fn().mockReturnValue(""),
+        find: vi.fn().mockReturnValue({
+          each: vi.fn(),
+          length: 0,
+        }),
+        length: 0,
+      } as any);
+
+      await expect(
+        OCRService.extractRecipeFromInstagramScraping(
+          "https://www.instagram.com/p/ABC123/"
+        )
+      ).rejects.toThrow("No recipe content found in Instagram post");
+    });
+  });
+
+  describe("extractRecipeFromInstagramUrl", () => {
+    it("should use API when token is available and succeed", async () => {
+      const mockAxios = await import("axios");
+      const mockResponse = {
+        data: {
+          id: "123456789",
+          caption: {
+            text: "My recipe:\n\n2 cups flour\n1 cup water\nMix and bake!",
+          },
+          comments: { data: [] },
+          media_type: "IMAGE",
+          permalink: "https://www.instagram.com/p/ABC123/",
+        },
+      };
+
+      vi.mocked(mockAxios.default.get).mockResolvedValue(mockResponse);
+
+      const result = await OCRService.extractRecipeFromInstagramUrl(
+        "https://www.instagram.com/p/ABC123/",
+        false
+      );
+
+      expect(result.source).toBe("api");
+      expect(result.confidence).toBe(0.9);
+      expect(result.text).toContain("My recipe:");
+    });
+
+    it("should fall back to scraping when API fails and fallback is enabled", async () => {
+      const mockAxios = await import("axios");
+      const mockCheerio = await import("cheerio");
+
+      // Mock API failure
+      vi.mocked(mockAxios.default.get).mockRejectedValueOnce(
+        new Error("API Error")
+      );
+
+      // Mock scraping success
+      const mockHtml = `
+        <html>
+          <body>
+            <div data-testid="comment">
+              📌 PINNED COMMENT
+              2 cups flour
+              1 cup water
+              Mix and bake!
+            </div>
+          </body>
+        </html>
+      `;
+
+      vi.mocked(mockAxios.default.get).mockResolvedValueOnce({
+        data: mockHtml,
+      });
+      vi.mocked(mockCheerio.load).mockReturnValue({
+        load: vi.fn(),
+        text: vi
+          .fn()
+          .mockReturnValue(
+            "📌 PINNED COMMENT\n2 cups flour\n1 cup water\nMix and bake!"
+          ),
+        find: vi.fn().mockReturnValue({
+          each: vi.fn().mockImplementation((callback) => {
+            callback(0, {
+              text: () =>
+                "📌 PINNED COMMENT\n2 cups flour\n1 cup water\nMix and bake!",
+            });
+          }),
+          length: 1,
+        }),
+        length: 1,
+      } as any);
+
+      const result = await OCRService.extractRecipeFromInstagramUrl(
+        "https://www.instagram.com/p/ABC123/",
+        true
+      );
+
+      expect(result.source).toBe("scraping");
+      expect(result.confidence).toBe(0.8);
+      expect(result.text).toContain("📌 PINNED COMMENT");
+    });
+
+    it("should throw error when API fails and fallback is disabled", async () => {
+      const mockAxios = await import("axios");
+
+      vi.mocked(mockAxios.default.get).mockRejectedValue(
+        new Error("API Error")
+      );
+
+      await expect(
+        OCRService.extractRecipeFromInstagramUrl(
+          "https://www.instagram.com/p/ABC123/",
+          false
+        )
+      ).rejects.toThrow(
+        "Instagram API failed and scraping fallback is disabled"
+      );
+    });
+
+    it("should use scraping when no API token is available", async () => {
+      // Temporarily mock no API token
+      vi.doMock("process", () => ({
+        env: {
+          INSTAGRAM_ACCESS_TOKEN: undefined,
+          ENABLE_SCRAPING_FALLBACK: "true",
+        },
+      }));
+
+      const mockAxios = await import("axios");
+      const mockCheerio = await import("cheerio");
+
+      const mockHtml = `
+        <html>
+          <body>
+            <div data-testid="comment">
+              2 cups flour
+              1 cup water
+              Mix and bake!
+            </div>
+          </body>
+        </html>
+      `;
+
+      vi.mocked(mockAxios.default.get).mockResolvedValue({ data: mockHtml });
+      vi.mocked(mockCheerio.load).mockReturnValue({
+        load: vi.fn(),
+        text: vi
+          .fn()
+          .mockReturnValue("2 cups flour\n1 cup water\nMix and bake!"),
+        find: vi.fn().mockReturnValue({
+          each: vi.fn().mockImplementation((callback) => {
+            callback(0, {
+              text: () => "2 cups flour\n1 cup water\nMix and bake!",
+            });
+          }),
+          length: 1,
+        }),
+        length: 1,
+      } as any);
+
+      const result = await OCRService.extractRecipeFromInstagramUrl(
+        "https://www.instagram.com/p/ABC123/",
+        true
+      );
+
+      expect(result.source).toBe("scraping");
+      expect(result.confidence).toBe(0.8);
     });
   });
 
