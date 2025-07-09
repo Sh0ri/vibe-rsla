@@ -1,18 +1,26 @@
 # Instagram Recipe Extraction
 
-This feature extracts recipes from Instagram food posts by processing Instagram URLs and focusing on pinned comments where recipes are commonly shared.
+This feature extracts recipes from Instagram food posts by processing Instagram URLs. It uses the Instagram Graph API as the primary method, with web scraping as a fallback option when enabled.
 
 ## Features
 
-### 🎯 Instagram URL Processing
+### 🎯 Instagram API Integration
+- **Primary Method**: Uses Instagram Graph API for reliable data extraction
+- **Access Token Support**: Configurable Instagram API access token
+- **Structured Data**: Extracts captions and comments with metadata
+- **High Confidence**: API data provides higher confidence scores
+
+### 🔄 Fallback Scraping
+- **Web Scraping**: Falls back to web scraping when API is unavailable
+- **Configurable**: Enable/disable scraping fallback via environment variable
 - **URL Validation**: Validates Instagram URLs and extracts content via web scraping
 - **Pinned Comment Detection**: Prioritizes pinned comments (most likely to contain recipes)
 - **Fallback Content**: Falls back to captions and general comments if no pinned content found
+
+### 📊 Enhanced Analysis
 - **Social Media Cleanup**: Removes emojis, hashtags, mentions, and social media phrases
 - **Recipe Validation**: Calculates confidence scores for extracted recipe content
 - **Metadata Analysis**: Provides insights about the content structure
-
-### 📊 Enhanced Analysis
 - **Comment Type Classification**: 
   - `pinned` - Pinned comments (most likely to contain recipes)
   - `regular` - Regular comments
@@ -51,11 +59,11 @@ Extract recipe from Instagram post URL.
   "data": {
     "originalText": "Raw extracted text...",
     "extractedRecipe": "Cleaned recipe text...",
-    "confidence": 0.8,
+    "confidence": 0.9,
     "recipeConfidence": 0.9,
     "processingTime": 1500,
     "isComment": true,
-    "commentType": "pinned",
+    "commentType": "caption",
     "metadata": {
       "hasEmojis": true,
       "hasHashtags": true,
@@ -73,48 +81,65 @@ Extract recipe from Instagram post URL.
       }
     ],
     "totalIngredients": 4,
-    "instagramUrl": "https://www.instagram.com/p/example/"
+    "instagramUrl": "https://www.instagram.com/p/example/",
+    "source": "api"
   }
 }
 ```
 
 ## How It Works
 
-### 1. URL Processing
-The service processes Instagram URLs by:
-- Fetching the Instagram post HTML content via web scraping
-- Extracting text from comments and captions
-- Prioritizing pinned comments for recipe content
+### 1. API-First Approach
+The service prioritizes Instagram Graph API:
+- **Authentication**: Uses Instagram API access token for authentication
+- **Media ID Extraction**: Extracts media ID from Instagram URLs
+- **API Request**: Fetches post data including captions and comments
+- **Content Analysis**: Analyzes API response for recipe content
 
-### 2. Content Extraction
-The service extracts content in this priority order:
-1. **Pinned Comments**: Looks for comments with 📌 emoji or "PINNED" text
-2. **Captions**: Extracts post captions if no pinned comments found
-3. **General Comments**: Searches for recipe-related content in all comments
+### 2. Fallback Scraping
+When API is unavailable or fails:
+- **Web Scraping**: Fetches Instagram post HTML content
+- **Content Extraction**: Extracts text from comments and captions
+- **Priority Order**: Pinned comments → Captions → General comments
 
-### 3. Text Analysis
-The service analyzes the extracted text to identify Instagram-specific patterns:
-- Looks for pinned comment indicators (📌, "PINNED")
-- Detects social media elements (emojis, hashtags, mentions)
-- Classifies content type based on patterns
+### 3. Content Processing
+Both methods follow the same content processing:
+- **Text Analysis**: Identifies Instagram-specific patterns
+- **Recipe Extraction**: Filters and cleans recipe content
+- **Confidence Calculation**: Scores recipe validity
+- **Ingredient Parsing**: Extracts structured ingredient data
 
-### 4. Recipe Extraction
-Once Instagram content is identified, the service:
-- Removes emojis, hashtags, and social media phrases
-- Filters lines based on recipe indicators:
+### 4. Instagram API Processing
+When using the Instagram API:
+- **Caption Extraction**: Gets post captions with full text
+- **Comment Analysis**: Filters comments for recipe content
+- **Content Selection**: Chooses the most relevant content
+- **Metadata Preservation**: Maintains original post structure
+
+### 5. Web Scraping Processing
+When using web scraping:
+- **HTML Parsing**: Uses Cheerio to parse Instagram HTML
+- **Pinned Detection**: Looks for pinned comment indicators (📌, "PINNED")
+- **Fallback Strategy**: Captions → General comments → Recipe keywords
+- **Content Filtering**: Removes non-recipe content
+
+### 6. Recipe Extraction
+Once content is identified, the service:
+- **Social Media Cleanup**: Removes emojis, hashtags, and social media phrases
+- **Recipe Filtering**: Keeps lines with recipe indicators:
   - Quantity patterns (numbers + units)
   - Ingredient keywords
   - Cooking instruction verbs
-- Preserves only recipe-relevant content
+- **Content Preservation**: Maintains recipe structure and formatting
 
-### 5. Confidence Calculation
+### 7. Confidence Calculation
 The service calculates recipe confidence based on:
 - **Ingredient Patterns** (30%): Presence of quantity + unit combinations
 - **Common Ingredients** (30%): Recognition of typical recipe ingredients
 - **Cooking Instructions** (20%): Presence of cooking verbs
 - **Content Structure** (20%): Appropriate text length and line count
 
-### 6. Ingredient Parsing
+### 8. Ingredient Parsing
 The extracted recipe text is then processed by the ingredient parser to:
 - Extract individual ingredients with quantities and units
 - Categorize ingredients
@@ -138,7 +163,9 @@ const response = await fetch('/api/ocr/instagram-recipe', {
 const result = await response.json();
 
 if (result.success) {
-  const { ingredients, recipeConfidence, commentType } = result.data;
+  const { ingredients, recipeConfidence, commentType, source } = result.data;
+  
+  console.log(`Recipe extracted using: ${source}`);
   
   if (recipeConfidence > 0.7) {
     // High confidence recipe found
@@ -159,44 +186,65 @@ curl -X POST http://localhost:3001/api/ocr/instagram-recipe \
 
 ## Best Practices
 
-1. **URL Format**: Ensure Instagram URLs are in the correct format (https://www.instagram.com/p/...)
-2. **Content Focus**: Target posts with pinned comments where recipes are most commonly shared
-3. **Validation**: Check `recipeConfidence` score before processing
-4. **Error Handling**: Handle cases where no recipe content is found
-5. **Rate Limiting**: Respect Instagram's rate limits when making requests
+1. **Instagram API Setup**: Configure Instagram API access token for best results
+2. **URL Format**: Ensure Instagram URLs are in the correct format (https://www.instagram.com/p/...)
+3. **Content Focus**: Target posts with clear captions or comments containing recipes
+4. **Validation**: Check `recipeConfidence` score before processing
+5. **Error Handling**: Handle cases where no recipe content is found
+6. **Rate Limiting**: Respect Instagram's API rate limits and terms of service
 
 ## Configuration
 
 ### Environment Variables
+- `INSTAGRAM_ACCESS_TOKEN`: Instagram Graph API access token
+- `ENABLE_SCRAPING_FALLBACK`: Enable scraping fallback (true/false)
 - `NODE_ENV`: Environment mode (development/production)
 
+### Instagram API Setup
+1. **Create Facebook App**: Set up a Facebook Developer account and create an app
+2. **Configure Instagram Basic Display**: Add Instagram Basic Display to your app
+3. **Generate Access Token**: Create a long-lived access token
+4. **Set Environment Variable**: Add the token to your `.env` file
+
 ### Performance Considerations
-- Web scraping processing time varies with Instagram page complexity
-- Instagram posts with clear text yield better results
-- Consider caching results for repeated processing
-- Be mindful of Instagram's terms of service and rate limits
+- **API Priority**: Instagram API provides faster, more reliable results
+- **Fallback Strategy**: Web scraping is slower but works without API access
+- **Caching**: Consider caching results for repeated processing
+- **Rate Limits**: Instagram API has rate limits; implement appropriate throttling
 
 ## Error Handling
 
 The service provides detailed error messages for:
-- Invalid Instagram URLs
-- Network request failures
-- No recipe content found
-- Low confidence recipe detection
-- Ingredient parsing errors
+- **API Errors**: Invalid access token, rate limits, API failures
+- **URL Issues**: Invalid Instagram URLs, unsupported formats
+- **Content Issues**: No recipe content found, low confidence detection
+- **Network Issues**: Connection failures, timeout errors
+- **Parsing Errors**: Ingredient parsing failures
 
 ## Limitations
 
-- **Instagram Terms**: Web scraping may be subject to Instagram's terms of service
-- **Rate Limits**: Instagram may rate limit requests
+### Instagram API Limitations
+- **Access Required**: Requires Instagram API access token
+- **Content Scope**: Limited to public posts and authorized content
+- **Rate Limits**: API has usage limits and quotas
+- **Data Availability**: Some content may not be accessible via API
+
+### Web Scraping Limitations
+- **Terms of Service**: Web scraping may be subject to Instagram's terms
+- **Rate Limits**: Instagram may rate limit scraping requests
 - **Content Changes**: Instagram's HTML structure may change, requiring updates
 - **Private Posts**: Cannot access private Instagram posts
 - **Authentication**: Some content may require Instagram authentication
+
+### General Limitations
 - **Text-Only**: This service only processes text content from Instagram posts, not images
+- **Language Support**: Currently optimized for English content
+- **Recipe Recognition**: May miss complex or non-standard recipe formats
 
 ## Future Enhancements
 
-- **Instagram API Integration**: Use official Instagram API when available
 - **Multi-language Support**: Support for recipes in different languages
 - **Recipe Structure Recognition**: Better identification of ingredients vs instructions
-- **Batch Processing**: Handle multiple Instagram posts simultaneously 
+- **Batch Processing**: Handle multiple Instagram posts simultaneously
+- **Advanced Filtering**: More sophisticated recipe content detection
+- **Image Analysis**: Future integration with image-based recipe extraction 

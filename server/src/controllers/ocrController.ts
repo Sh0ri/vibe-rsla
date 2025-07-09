@@ -6,9 +6,14 @@ export class OCRController {
    * Extract recipe from Instagram post URL (focused on pinned comments)
    */
   static async extractRecipeFromInstagramUrl(instagramUrl: string) {
-    // Extract recipe from Instagram URL
+    // Check if scraping fallback is enabled
+    const useScrapingFallback =
+      process.env["ENABLE_SCRAPING_FALLBACK"] === "true";
+
+    // Extract recipe from Instagram URL using API first, scraping as fallback
     const instagramResult = await OCRService.extractRecipeFromInstagramUrl(
-      instagramUrl
+      instagramUrl,
+      useScrapingFallback
     );
 
     // Parse ingredients from the extracted recipe
@@ -41,6 +46,7 @@ export class OCRController {
       ingredients: enhancedIngredients,
       totalIngredients: enhancedIngredients.length,
       instagramUrl,
+      source: instagramResult.source, // Add source information (api or scraping)
     };
   }
 }
