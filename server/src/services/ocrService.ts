@@ -1,13 +1,12 @@
 import Tesseract from "tesseract.js";
 import { createWorker } from "tesseract.js";
+import axios from "axios";
+import * as cheerio from "cheerio";
 
-export interface OCRResult {
+export interface InstagramOCRResult {
   text: string;
   confidence: number;
   processingTime: number;
-}
-
-export interface InstagramOCRResult extends OCRResult {
   isComment: boolean;
   commentType: "pinned" | "regular" | "caption" | "unknown";
   recipeConfidence: number;
@@ -53,78 +52,10 @@ export class OCRService {
   }
 
   /**
-   * Extract text from image buffer
+   * Extract recipe from Instagram post URL (focused on pinned comments)
    */
-  static async extractText(imageBuffer: Buffer): Promise<OCRResult> {
-    if (!this.isInitialized) {
-      await this.initialize();
-    }
-
-    if (!this.worker) {
-      throw new Error("OCR worker not initialized");
-    }
-
-    const startTime = Date.now();
-
-    try {
-      const result = await this.worker.recognize(imageBuffer);
-
-      const processingTime = Date.now() - startTime;
-
-      return {
-        text: result.data.text,
-        confidence: result.data.confidence,
-        processingTime,
-      };
-    } catch (error) {
-      console.error("Error extracting text from image:", error);
-      throw new Error(
-        `OCR processing failed: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`
-      );
-    }
-  }
-
-  /**
-   * Extract text from image URL
-   */
-  static async extractTextFromUrl(imageUrl: string): Promise<OCRResult> {
-    if (!this.isInitialized) {
-      await this.initialize();
-    }
-
-    if (!this.worker) {
-      throw new Error("OCR worker not initialized");
-    }
-
-    const startTime = Date.now();
-
-    try {
-      const result = await this.worker.recognize(imageUrl);
-
-      const processingTime = Date.now() - startTime;
-
-      return {
-        text: result.data.text,
-        confidence: result.data.confidence,
-        processingTime,
-      };
-    } catch (error) {
-      console.error("Error extracting text from image URL:", error);
-      throw new Error(
-        `OCR processing failed: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`
-      );
-    }
-  }
-
-  /**
-   * Extract recipe from Instagram food post (focused on pinned comments)
-   */
-  static async extractRecipeFromInstagramPost(
-    imageBuffer: Buffer
+  static async extractRecipeFromInstagramUrl(
+    instagramUrl: string
   ): Promise<InstagramOCRResult> {
     if (!this.isInitialized) {
       await this.initialize();
@@ -137,15 +68,69 @@ export class OCRService {
     const startTime = Date.now();
 
     try {
-      const result = await this.worker.recognize(imageBuffer);
+      // Fetch Instagram post content
+      const response = await axios.get(instagramUrl, {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+        },
+      });
+
+      const html = response.data;
+      const $ = cheerio.load(html);
+
+      // Extract text content from Instagram post
+      // Focus on pinned comments and captions
+      let extractedText = "";
+
+      // Look for pinned comments first (most likely to contain recipes)
+      $('[data-testid="comment"], ._a9zr, ._a9zs').each((index, element) => {
+        const commentText = $(element).text().trim();
+        if (
+          commentText.includes("📌") ||
+          commentText.includes("PINNED") ||
+          $(element).find('[data-testid="pin-icon"]').length > 0
+        ) {
+          extractedText += commentText + "\n";
+        }
+      });
+
+      // If no pinned comments found, look for captions
+      if (!extractedText.trim()) {
+        $('[data-testid="post-caption"], ._a9zs, ._a9zr').each(
+          (index, element) => {
+            const captionText = $(element).text().trim();
+            if (captionText) {
+              extractedText += captionText + "\n";
+            }
+          }
+        );
+      }
+
+      // If still no content, try general comment extraction
+      if (!extractedText.trim()) {
+        $("span, p, div").each((index, element) => {
+          const text = $(element).text().trim();
+          if (
+            (text.length > 20 && text.includes("ingredient")) ||
+            text.includes("recipe") ||
+            text.includes("cup") ||
+            text.includes("tbsp") ||
+            text.includes("tsp")
+          ) {
+            extractedText += text + "\n";
+          }
+        });
+      }
+
       const processingTime = Date.now() - startTime;
 
       // Analyze the extracted text for Instagram-specific patterns
-      const analysis = this.analyzeInstagramText(result.data.text);
+      const analysis = this.analyzeInstagramText(extractedText);
 
       // Extract recipe from the most likely comment section
       const extractedRecipe = this.extractRecipeFromInstagramText(
-        result.data.text,
+        extractedText,
         analysis
       );
 
@@ -153,8 +138,8 @@ export class OCRService {
       const recipeConfidence = this.calculateRecipeConfidence(extractedRecipe);
 
       return {
-        text: result.data.text,
-        confidence: result.data.confidence,
+        text: extractedText,
+        confidence: 0.8, // Default confidence for web scraping
         processingTime,
         isComment: analysis.isComment,
         commentType: analysis.commentType,
@@ -163,9 +148,9 @@ export class OCRService {
         metadata: analysis.metadata,
       };
     } catch (error) {
-      console.error("Error extracting recipe from Instagram post:", error);
+      console.error("Error extracting recipe from Instagram URL:", error);
       throw new Error(
-        `Instagram OCR processing failed: ${
+        `Instagram URL processing failed: ${
           error instanceof Error ? error.message : "Unknown error"
         }`
       );
@@ -403,139 +388,6 @@ export class OCRService {
     if (lines.length >= 3 && lines.length <= 30) confidence += 0.1;
 
     return Math.min(confidence, 1.0);
-  }
-
-  /**
-   * Clean and preprocess extracted text for recipe parsing
-   */
-  static cleanRecipeText(text: string): string {
-    return (
-      text
-        // Remove extra whitespace
-        .replace(/\s+/g, " ")
-        // Remove common OCR artifacts
-        .replace(/[|]/g, "I")
-        .replace(/[0]/g, "O")
-        .replace(/[1]/g, "l")
-        // Fix common recipe text issues
-        .replace(/(\d+)\s*-\s*(\d+)/g, "$1-$2") // Fix number ranges
-        .replace(/(\d+)\s*\/\s*(\d+)/g, "$1/$2") // Fix fractions
-        .replace(/(\d+)\s*(\w+)/g, "$1 $2") // Ensure space between numbers and units
-        // Remove lines that are likely not ingredients
-        .split("\n")
-        .filter((line) => {
-          const trimmed = line.trim();
-          // Remove empty lines
-          if (!trimmed) return false;
-          // Remove lines that are likely instructions (start with verbs)
-          if (
-            /^(preheat|heat|add|mix|stir|combine|place|put|set|turn|open|close|wash|cut|chop|slice|dice|mince|grate|peel|remove|drain|rinse|pat|dry|season|salt|pepper|taste|adjust|serve|garnish|decorate)/i.test(
-              trimmed
-            )
-          ) {
-            return false;
-          }
-          // Remove lines that are too short (likely not ingredients)
-          if (trimmed.length < 3) return false;
-          // Remove lines that are all uppercase (likely headers)
-          if (trimmed === trimmed.toUpperCase() && trimmed.length > 10)
-            return false;
-          return true;
-        })
-        .join("\n")
-        .trim()
-    );
-  }
-
-  /**
-   * Validate if extracted text is likely a recipe
-   */
-  static validateRecipeText(text: string): {
-    isValid: boolean;
-    confidence: number;
-    reasons: string[];
-  } {
-    const reasons: string[] = [];
-    let confidence = 0;
-
-    // Check for ingredient-like patterns
-    const ingredientPatterns = [
-      /\d+\s*(cup|tablespoon|teaspoon|ounce|pound|gram|kilogram|ml|liter|clove|pinch|dash)/i,
-      /\d+\s*-\s*\d+\s*(cup|tablespoon|teaspoon|ounce|pound|gram|kilogram|ml|liter)/i,
-      /\d+\/\d+\s*(cup|tablespoon|teaspoon|ounce|pound|gram|kilogram|ml|liter)/i,
-    ];
-
-    const hasIngredientPatterns = ingredientPatterns.some((pattern) =>
-      pattern.test(text)
-    );
-    if (hasIngredientPatterns) {
-      confidence += 0.4;
-    } else {
-      reasons.push("No ingredient quantity patterns found");
-    }
-
-    // Check for common ingredient words
-    const commonIngredients = [
-      "salt",
-      "pepper",
-      "oil",
-      "butter",
-      "flour",
-      "sugar",
-      "egg",
-      "milk",
-      "cheese",
-      "tomato",
-      "onion",
-      "garlic",
-      "carrot",
-      "potato",
-      "chicken",
-      "beef",
-      "pork",
-      "rice",
-      "pasta",
-      "bread",
-      "lettuce",
-      "spinach",
-      "mushroom",
-      "bell pepper",
-    ];
-
-    const ingredientMatches = commonIngredients.filter((ingredient) =>
-      text.toLowerCase().includes(ingredient)
-    ).length;
-
-    if (ingredientMatches >= 3) {
-      confidence += 0.3;
-    } else if (ingredientMatches >= 1) {
-      confidence += 0.1;
-    } else {
-      reasons.push("No common ingredients found");
-    }
-
-    // Check for reasonable text length
-    if (text.length >= 50 && text.length <= 2000) {
-      confidence += 0.2;
-    } else {
-      reasons.push("Text length not suitable for recipe");
-    }
-
-    // Check for reasonable line count
-    const lines = text.split("\n").filter((line) => line.trim().length > 0);
-    if (lines.length >= 3 && lines.length <= 50) {
-      confidence += 0.1;
-    } else {
-      reasons.push("Number of lines not suitable for recipe");
-    }
-
-    const isValid = confidence >= 0.5;
-
-    return {
-      isValid,
-      confidence,
-      reasons,
-    };
   }
 
   /**
