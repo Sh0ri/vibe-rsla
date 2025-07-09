@@ -62,6 +62,58 @@ export class OCRController {
   }
 
   /**
+   * Extract recipe from Instagram food post (focused on pinned comments)
+   */
+  static async extractRecipeFromInstagramPost(
+    fileBuffer: Buffer,
+    filePath: string,
+    originalName: string,
+    size: number,
+    mimetype: string
+  ) {
+    // Extract recipe from Instagram post
+    const instagramResult = await OCRService.extractRecipeFromInstagramPost(
+      fileBuffer || fs.readFileSync(filePath)
+    );
+
+    // Parse ingredients from the extracted recipe
+    const parsedIngredients = await IngredientParserService.parseIngredients(
+      instagramResult.extractedRecipe
+    );
+
+    // Enhance ingredients with additional data
+    const enhancedIngredients = parsedIngredients.ingredients.map(
+      (ingredient) => ({
+        ...ingredient,
+        category:
+          ingredient.category ||
+          IngredientParserService.categorizeIngredient(ingredient.name),
+        synonyms: IngredientParserService.getIngredientSynonyms(
+          ingredient.name
+        ),
+      })
+    );
+
+    return {
+      originalText: instagramResult.text,
+      extractedRecipe: instagramResult.extractedRecipe,
+      confidence: instagramResult.confidence,
+      recipeConfidence: instagramResult.recipeConfidence,
+      processingTime: instagramResult.processingTime,
+      isComment: instagramResult.isComment,
+      commentType: instagramResult.commentType,
+      metadata: instagramResult.metadata,
+      ingredients: enhancedIngredients,
+      totalIngredients: enhancedIngredients.length,
+      fileInfo: {
+        originalName,
+        size,
+        mimetype,
+      },
+    };
+  }
+
+  /**
    * Extract text from image and parse ingredients
    */
   static async parseRecipeFromImage(

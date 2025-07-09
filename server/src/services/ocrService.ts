@@ -7,6 +7,20 @@ export interface OCRResult {
   processingTime: number;
 }
 
+export interface InstagramOCRResult extends OCRResult {
+  isComment: boolean;
+  commentType: "pinned" | "regular" | "caption" | "unknown";
+  recipeConfidence: number;
+  extractedRecipe: string;
+  metadata: {
+    hasEmojis: boolean;
+    hasHashtags: boolean;
+    hasMentions: boolean;
+    lineCount: number;
+    wordCount: number;
+  };
+}
+
 export class OCRService {
   private static worker: Tesseract.Worker | null = null;
   private static isInitialized = false;
@@ -20,15 +34,7 @@ export class OCRService {
     }
 
     try {
-      this.worker = await createWorker({
-        logger:
-          process.env.NODE_ENV === "development"
-            ? (m) => console.log(m)
-            : undefined,
-      });
-
-      await this.worker.loadLanguage(process.env.TESSERACT_LANG || "eng");
-      await this.worker.initialize(process.env.TESSERACT_LANG || "eng");
+      this.worker = await createWorker(process.env["TESSERACT_LANG"] || "eng");
 
       // Configure for better recipe text recognition
       await this.worker.setParameters({
@@ -112,6 +118,291 @@ export class OCRService {
         }`
       );
     }
+  }
+
+  /**
+   * Extract recipe from Instagram food post (focused on pinned comments)
+   */
+  static async extractRecipeFromInstagramPost(
+    imageBuffer: Buffer
+  ): Promise<InstagramOCRResult> {
+    if (!this.isInitialized) {
+      await this.initialize();
+    }
+
+    if (!this.worker) {
+      throw new Error("OCR worker not initialized");
+    }
+
+    const startTime = Date.now();
+
+    try {
+      const result = await this.worker.recognize(imageBuffer);
+      const processingTime = Date.now() - startTime;
+
+      // Analyze the extracted text for Instagram-specific patterns
+      const analysis = this.analyzeInstagramText(result.data.text);
+
+      // Extract recipe from the most likely comment section
+      const extractedRecipe = this.extractRecipeFromInstagramText(
+        result.data.text,
+        analysis
+      );
+
+      // Calculate recipe confidence
+      const recipeConfidence = this.calculateRecipeConfidence(extractedRecipe);
+
+      return {
+        text: result.data.text,
+        confidence: result.data.confidence,
+        processingTime,
+        isComment: analysis.isComment,
+        commentType: analysis.commentType,
+        recipeConfidence,
+        extractedRecipe,
+        metadata: analysis.metadata,
+      };
+    } catch (error) {
+      console.error("Error extracting recipe from Instagram post:", error);
+      throw new Error(
+        `Instagram OCR processing failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`
+      );
+    }
+  }
+
+  /**
+   * Analyze Instagram text to identify comment sections and recipe content
+   */
+  static analyzeInstagramText(text: string): {
+    isComment: boolean;
+    commentType: "pinned" | "regular" | "caption" | "unknown";
+    metadata: {
+      hasEmojis: boolean;
+      hasHashtags: boolean;
+      hasMentions: boolean;
+      lineCount: number;
+      wordCount: number;
+    };
+  } {
+    const lines = text.split("\n").filter((line) => line.trim().length > 0);
+    const fullText = text.toLowerCase();
+
+    // Check for Instagram-specific patterns
+    const hasEmojis =
+      /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/u.test(
+        text
+      );
+    const hasHashtags = /#[a-zA-Z0-9_]+/g.test(text);
+    const hasMentions = /@[a-zA-Z0-9_.]+/g.test(text);
+
+    // Identify comment type based on patterns
+    let commentType: "pinned" | "regular" | "caption" | "unknown" = "unknown";
+
+    // Look for pinned comment indicators
+    if (
+      fullText.includes("pinned") ||
+      fullText.includes("📌") ||
+      lines.some((line) => line.includes("📌") || line.includes("PINNED"))
+    ) {
+      commentType = "pinned";
+    }
+    // Look for caption indicators
+    else if (
+      fullText.includes("caption") ||
+      fullText.includes("description") ||
+      lines.some(
+        (line) => line.includes("Caption:") || line.includes("Description:")
+      )
+    ) {
+      commentType = "caption";
+    }
+    // Check if it looks like a regular comment
+    else if (hasEmojis || hasHashtags || hasMentions || lines.length > 3) {
+      commentType = "regular";
+    }
+
+    const isComment = commentType !== "unknown";
+
+    return {
+      isComment,
+      commentType,
+      metadata: {
+        hasEmojis,
+        hasHashtags,
+        hasMentions,
+        lineCount: lines.length,
+        wordCount: text.split(/\s+/).length,
+      },
+    };
+  }
+
+  /**
+   * Extract recipe content from Instagram text
+   */
+  static extractRecipeFromInstagramText(text: string, analysis: any): string {
+    const lines = text.split("\n").filter((line) => line.trim().length > 0);
+
+    // Remove Instagram-specific content
+    let cleanedText = text
+      // Remove emojis
+      .replace(
+        /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/gu,
+        ""
+      )
+      // Remove hashtags
+      .replace(/#[a-zA-Z0-9_]+/g, "")
+      // Remove mentions
+      .replace(/@[a-zA-Z0-9_.]+/g, "")
+      // Remove common Instagram phrases
+      .replace(
+        /(recipe|ingredients|instructions|directions|steps|method|how to|tutorial|food|delicious|yummy|tasty|amazing|love this|try this|must try|save this|bookmark|share|follow|like|comment)/gi,
+        ""
+      )
+      // Remove social media indicators
+      .replace(
+        /(pinned|caption|description|comment|reply|dm|message|link in bio|swipe|tap|click|follow for more)/gi,
+        ""
+      );
+
+    // Split into lines and filter out non-recipe content
+    const recipeLines = cleanedText
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => {
+        if (!line || line.length < 3) return false;
+
+        // Keep lines that look like ingredients or instructions
+        const hasQuantity = /\d+/.test(line);
+        const hasUnit =
+          /(cup|tbsp|tsp|oz|lb|g|kg|ml|l|clove|pinch|dash|slice|piece|whole|half|quarter)/i.test(
+            line
+          );
+        const hasIngredient =
+          /(salt|pepper|oil|butter|flour|sugar|egg|milk|cheese|tomato|onion|garlic|carrot|potato|chicken|beef|pork|rice|pasta|bread|lettuce|spinach|mushroom|bell pepper|lemon|lime|herb|spice|seasoning)/i.test(
+            line
+          );
+        const hasInstruction =
+          /(preheat|heat|add|mix|stir|combine|place|put|set|turn|open|close|wash|cut|chop|slice|dice|mince|grate|peel|remove|drain|rinse|pat|dry|season|taste|adjust|serve|garnish|decorate|bake|cook|fry|grill|roast|boil|simmer|blend|whisk|fold|knead|roll|spread|pour|drizzle|sprinkle)/i.test(
+            line
+          );
+
+        return hasQuantity || hasUnit || hasIngredient || hasInstruction;
+      });
+
+    return recipeLines.join("\n").trim();
+  }
+
+  /**
+   * Calculate confidence that extracted text is a recipe
+   */
+  static calculateRecipeConfidence(recipeText: string): number {
+    if (!recipeText || recipeText.length < 10) return 0;
+
+    let confidence = 0;
+    const lines = recipeText
+      .split("\n")
+      .filter((line) => line.trim().length > 0);
+
+    // Check for ingredient patterns
+    const ingredientPatterns = [
+      /\d+\s*(cup|tbsp|tsp|oz|lb|g|kg|ml|l|clove|pinch|dash)/i,
+      /\d+\s*-\s*\d+\s*(cup|tbsp|tsp|oz|lb|g|kg|ml|l)/i,
+      /\d+\/\d+\s*(cup|tbsp|tsp|oz|lb|g|kg|ml|l)/i,
+    ];
+
+    const hasIngredientPatterns = ingredientPatterns.some((pattern) =>
+      pattern.test(recipeText)
+    );
+    if (hasIngredientPatterns) confidence += 0.3;
+
+    // Check for common ingredients
+    const commonIngredients = [
+      "salt",
+      "pepper",
+      "oil",
+      "butter",
+      "flour",
+      "sugar",
+      "egg",
+      "milk",
+      "cheese",
+      "tomato",
+      "onion",
+      "garlic",
+      "carrot",
+      "potato",
+      "chicken",
+      "beef",
+      "pork",
+      "rice",
+      "pasta",
+      "bread",
+      "lettuce",
+      "spinach",
+      "mushroom",
+      "bell pepper",
+    ];
+
+    const ingredientMatches = commonIngredients.filter((ingredient) =>
+      recipeText.toLowerCase().includes(ingredient)
+    ).length;
+
+    if (ingredientMatches >= 3) confidence += 0.3;
+    else if (ingredientMatches >= 1) confidence += 0.1;
+
+    // Check for cooking instructions
+    const instructionWords = [
+      "preheat",
+      "heat",
+      "add",
+      "mix",
+      "stir",
+      "combine",
+      "place",
+      "put",
+      "set",
+      "cut",
+      "chop",
+      "slice",
+      "dice",
+      "mince",
+      "grate",
+      "peel",
+      "remove",
+      "drain",
+      "rinse",
+      "pat",
+      "dry",
+      "season",
+      "taste",
+      "adjust",
+      "serve",
+      "garnish",
+      "bake",
+      "cook",
+      "fry",
+      "grill",
+      "roast",
+      "boil",
+      "simmer",
+      "blend",
+      "whisk",
+    ];
+
+    const instructionMatches = instructionWords.filter((word) =>
+      recipeText.toLowerCase().includes(word)
+    ).length;
+
+    if (instructionMatches >= 2) confidence += 0.2;
+    else if (instructionMatches >= 1) confidence += 0.1;
+
+    // Check text length and structure
+    if (recipeText.length >= 50 && recipeText.length <= 2000) confidence += 0.1;
+    if (lines.length >= 3 && lines.length <= 30) confidence += 0.1;
+
+    return Math.min(confidence, 1.0);
   }
 
   /**

@@ -188,6 +188,40 @@ router.post(
 );
 
 /**
+ * POST /api/ocr/instagram-recipe
+ * Extract recipe from Instagram food post (focused on pinned comments)
+ */
+router.post(
+  "/instagram-recipe",
+  upload.single("image"),
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({
+          success: false,
+          error: "No image file provided",
+        });
+      }
+
+      const result = await OCRController.extractRecipeFromInstagramPost(
+        req.file.buffer,
+        req.file.path,
+        req.file.originalname,
+        req.file.size,
+        req.file.mimetype
+      );
+
+      res.json({
+        success: true,
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+);
+
+/**
  * GET /api/ocr/status
  * Get OCR service status
  */
