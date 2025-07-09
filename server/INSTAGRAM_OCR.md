@@ -5,7 +5,7 @@ This feature extracts recipes from Instagram food posts by processing Instagram 
 ## Features
 
 ### 🎯 Instagram URL Processing
-- **URL Validation**: Validates Instagram URLs and extracts content
+- **URL Validation**: Validates Instagram URLs and extracts content via web scraping
 - **Pinned Comment Detection**: Prioritizes pinned comments (most likely to contain recipes)
 - **Fallback Content**: Falls back to captions and general comments if no pinned content found
 - **Social Media Cleanup**: Removes emojis, hashtags, mentions, and social media phrases
@@ -82,8 +82,8 @@ Extract recipe from Instagram post URL.
 
 ### 1. URL Processing
 The service processes Instagram URLs by:
-- Fetching the Instagram post HTML content
-- Using web scraping to extract text from comments and captions
+- Fetching the Instagram post HTML content via web scraping
+- Extracting text from comments and captions
 - Prioritizing pinned comments for recipe content
 
 ### 2. Content Extraction
@@ -168,7 +168,6 @@ curl -X POST http://localhost:3001/api/ocr/instagram-recipe \
 ## Configuration
 
 ### Environment Variables
-- `TESSERACT_LANG`: Language for text processing (default: "eng")
 - `NODE_ENV`: Environment mode (development/production)
 
 ### Performance Considerations
@@ -193,11 +192,11 @@ The service provides detailed error messages for:
 - **Content Changes**: Instagram's HTML structure may change, requiring updates
 - **Private Posts**: Cannot access private Instagram posts
 - **Authentication**: Some content may require Instagram authentication
+- **Text-Only**: This service only processes text content from Instagram posts, not images
 
 ## Future Enhancements
 
 - **Instagram API Integration**: Use official Instagram API when available
 - **Multi-language Support**: Support for recipes in different languages
 - **Recipe Structure Recognition**: Better identification of ingredients vs instructions
-- **Image Analysis**: Fallback to image analysis when text extraction fails
 - **Batch Processing**: Handle multiple Instagram posts simultaneously 

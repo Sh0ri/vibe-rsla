@@ -4,7 +4,8 @@ Transform any recipe into a smart shopping list with direct links to purchase in
 
 ## ✨ Features
 
-- **Recipe Input**: Text, URL, or photo (OCR) input
+- **Recipe Input**: Text or URL input (including Instagram posts)
+- **Instagram Recipe Extraction**: Extract recipes from Instagram food posts via URL
 - **Smart Ingredient Parsing**: NLP-powered extraction of ingredients, quantities, and units
 - **Store Integration**: Connect with Amazon, Carrefour, Monoprix, and local grocery stores
 - **Product Matching**: Automatic product suggestions with price comparison
@@ -72,16 +73,17 @@ Navigate to `http://localhost:3000`
 - **ORM**: Drizzle ORM
 - **NLP**: OpenAI API, spaCy for ingredient parsing
 - **E-commerce**: Amazon Product API, Open Food Facts API
-- **OCR**: Tesseract.js for image processing
+- **Instagram Scraping**: Web scraping for Instagram recipe extraction
 
 ## 📱 Usage
 
-1. **Input Recipe**: Paste text, upload image, or provide URL
-2. **Parse Ingredients**: AI extracts ingredients with quantities
-3. **Select Store**: Choose your preferred online grocery store
-4. **Review Products**: Browse suggested products with prices
-5. **Generate List**: Create shopping list with direct purchase links
-6. **Export**: Download list or add items to cart
+1. **Input Recipe**: Paste text or provide URL (including Instagram posts)
+2. **Extract from Instagram**: Automatically extract recipes from Instagram food posts
+3. **Parse Ingredients**: AI extracts ingredients with quantities
+4. **Select Store**: Choose your preferred online grocery store
+5. **Review Products**: Browse suggested products with prices
+6. **Generate List**: Create shopping list with direct purchase links
+7. **Export**: Download list or add items to cart
 
 ## 🔐 Environment Variables
 

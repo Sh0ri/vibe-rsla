@@ -1,5 +1,3 @@
-import Tesseract from "tesseract.js";
-import { createWorker } from "tesseract.js";
 import axios from "axios";
 import * as cheerio from "cheerio";
 
@@ -21,52 +19,13 @@ export interface InstagramOCRResult {
 }
 
 export class OCRService {
-  private static worker: Tesseract.Worker | null = null;
-  private static isInitialized = false;
-
-  /**
-   * Initialize Tesseract worker
-   */
-  static async initialize(): Promise<void> {
-    if (this.isInitialized) {
-      return;
-    }
-
-    try {
-      this.worker = await createWorker(process.env["TESSERACT_LANG"] || "eng");
-
-      // Configure for better recipe text recognition
-      await this.worker.setParameters({
-        tessedit_char_whitelist:
-          "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}\"'-/\\\n\r\t ",
-        tessedit_pageseg_mode: Tesseract.PSM.AUTO,
-        preserve_interword_spaces: "1",
-      });
-
-      this.isInitialized = true;
-      console.log("Tesseract OCR initialized successfully");
-    } catch (error) {
-      console.error("Error initializing Tesseract OCR:", error);
-      throw new Error("Failed to initialize OCR service");
-    }
-  }
-
   /**
    * Extract recipe from Instagram post URL (focused on pinned comments)
    */
   static async extractRecipeFromInstagramUrl(
     instagramUrl: string
   ): Promise<InstagramOCRResult> {
-    if (!this.isInitialized) {
-      await this.initialize();
-    }
-
-    if (!this.worker) {
-      throw new Error("OCR worker not initialized");
-    }
-
     const startTime = Date.now();
-
     try {
       // Fetch Instagram post content
       const response = await axios.get(instagramUrl, {
@@ -75,14 +34,12 @@ export class OCRService {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
         },
       });
-
       const html = response.data;
       const $ = cheerio.load(html);
 
       // Extract text content from Instagram post
       // Focus on pinned comments and captions
       let extractedText = "";
-
       // Look for pinned comments first (most likely to contain recipes)
       $('[data-testid="comment"], ._a9zr, ._a9zs').each((index, element) => {
         const commentText = $(element).text().trim();
@@ -94,7 +51,6 @@ export class OCRService {
           extractedText += commentText + "\n";
         }
       });
-
       // If no pinned comments found, look for captions
       if (!extractedText.trim()) {
         $('[data-testid="post-caption"], ._a9zs, ._a9zr').each(
@@ -106,7 +62,6 @@ export class OCRService {
           }
         );
       }
-
       // If still no content, try general comment extraction
       if (!extractedText.trim()) {
         $("span, p, div").each((index, element) => {
@@ -122,21 +77,16 @@ export class OCRService {
           }
         });
       }
-
       const processingTime = Date.now() - startTime;
-
       // Analyze the extracted text for Instagram-specific patterns
       const analysis = this.analyzeInstagramText(extractedText);
-
       // Extract recipe from the most likely comment section
       const extractedRecipe = this.extractRecipeFromInstagramText(
         extractedText,
         analysis
       );
-
       // Calculate recipe confidence
       const recipeConfidence = this.calculateRecipeConfidence(extractedRecipe);
-
       return {
         text: extractedText,
         confidence: 0.8, // Default confidence for web scraping
@@ -173,7 +123,6 @@ export class OCRService {
   } {
     const lines = text.split("\n").filter((line) => line.trim().length > 0);
     const fullText = text.toLowerCase();
-
     // Check for Instagram-specific patterns
     const hasEmojis =
       /[\u{1F600}-\u{1F64F}]|[\u{1F300}-\u{1F5FF}]|[\u{1F680}-\u{1F6FF}]|[\u{1F1E0}-\u{1F1FF}]|[\u{2600}-\u{26FF}]|[\u{2700}-\u{27BF}]/u.test(
@@ -181,10 +130,8 @@ export class OCRService {
       );
     const hasHashtags = /#[a-zA-Z0-9_]+/g.test(text);
     const hasMentions = /@[a-zA-Z0-9_.]+/g.test(text);
-
     // Identify comment type based on patterns
     let commentType: "pinned" | "regular" | "caption" | "unknown" = "unknown";
-
     // Look for pinned comment indicators
     if (
       fullText.includes("pinned") ||
@@ -207,9 +154,7 @@ export class OCRService {
     else if (hasEmojis || hasHashtags || hasMentions || lines.length > 3) {
       commentType = "regular";
     }
-
     const isComment = commentType !== "unknown";
-
     return {
       isComment,
       commentType,
@@ -228,7 +173,6 @@ export class OCRService {
    */
   static extractRecipeFromInstagramText(text: string, analysis: any): string {
     const lines = text.split("\n").filter((line) => line.trim().length > 0);
-
     // Remove Instagram-specific content
     let cleanedText = text
       // Remove emojis
@@ -250,14 +194,12 @@ export class OCRService {
         /(pinned|caption|description|comment|reply|dm|message|link in bio|swipe|tap|click|follow for more)/gi,
         ""
       );
-
     // Split into lines and filter out non-recipe content
     const recipeLines = cleanedText
       .split("\n")
       .map((line) => line.trim())
       .filter((line) => {
         if (!line || line.length < 3) return false;
-
         // Keep lines that look like ingredients or instructions
         const hasQuantity = /\d+/.test(line);
         const hasUnit =
@@ -272,10 +214,8 @@ export class OCRService {
           /(preheat|heat|add|mix|stir|combine|place|put|set|turn|open|close|wash|cut|chop|slice|dice|mince|grate|peel|remove|drain|rinse|pat|dry|season|taste|adjust|serve|garnish|decorate|bake|cook|fry|grill|roast|boil|simmer|blend|whisk|fold|knead|roll|spread|pour|drizzle|sprinkle)/i.test(
             line
           );
-
         return hasQuantity || hasUnit || hasIngredient || hasInstruction;
       });
-
     return recipeLines.join("\n").trim();
   }
 
@@ -284,24 +224,20 @@ export class OCRService {
    */
   static calculateRecipeConfidence(recipeText: string): number {
     if (!recipeText || recipeText.length < 10) return 0;
-
     let confidence = 0;
     const lines = recipeText
       .split("\n")
       .filter((line) => line.trim().length > 0);
-
     // Check for ingredient patterns
     const ingredientPatterns = [
       /\d+\s*(cup|tbsp|tsp|oz|lb|g|kg|ml|l|clove|pinch|dash)/i,
       /\d+\s*-\s*\d+\s*(cup|tbsp|tsp|oz|lb|g|kg|ml|l)/i,
       /\d+\/\d+\s*(cup|tbsp|tsp|oz|lb|g|kg|ml|l)/i,
     ];
-
     const hasIngredientPatterns = ingredientPatterns.some((pattern) =>
       pattern.test(recipeText)
     );
     if (hasIngredientPatterns) confidence += 0.3;
-
     // Check for common ingredients
     const commonIngredients = [
       "salt",
@@ -329,14 +265,11 @@ export class OCRService {
       "mushroom",
       "bell pepper",
     ];
-
     const ingredientMatches = commonIngredients.filter((ingredient) =>
       recipeText.toLowerCase().includes(ingredient)
     ).length;
-
     if (ingredientMatches >= 3) confidence += 0.3;
     else if (ingredientMatches >= 1) confidence += 0.1;
-
     // Check for cooking instructions
     const instructionWords = [
       "preheat",
@@ -375,40 +308,24 @@ export class OCRService {
       "blend",
       "whisk",
     ];
-
     const instructionMatches = instructionWords.filter((word) =>
       recipeText.toLowerCase().includes(word)
     ).length;
-
     if (instructionMatches >= 2) confidence += 0.2;
     else if (instructionMatches >= 1) confidence += 0.1;
-
     // Check text length and structure
     if (recipeText.length >= 50 && recipeText.length <= 2000) confidence += 0.1;
     if (lines.length >= 3 && lines.length <= 30) confidence += 0.1;
-
     return Math.min(confidence, 1.0);
   }
 
   /**
-   * Terminate OCR worker
-   */
-  static async terminate(): Promise<void> {
-    if (this.worker) {
-      await this.worker.terminate();
-      this.worker = null;
-      this.isInitialized = false;
-      console.log("Tesseract OCR terminated");
-    }
-  }
-
-  /**
-   * Get OCR worker status
+   * Get OCR worker status (now just a stub for compatibility)
    */
   static getStatus(): { isInitialized: boolean; workerExists: boolean } {
     return {
-      isInitialized: this.isInitialized,
-      workerExists: this.worker !== null,
+      isInitialized: true,
+      workerExists: false,
     };
   }
 }
