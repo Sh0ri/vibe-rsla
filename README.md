@@ -104,14 +104,6 @@ PORT=3001
 NODE_ENV=development
 ```
 
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
-
 ## 📄 License
 
 MIT License - see LICENSE file for details
