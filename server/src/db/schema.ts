@@ -6,7 +6,6 @@ import {
   boolean,
   real,
   uniqueIndex,
-  index,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 
